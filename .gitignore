@@ -1,0 +1,10 @@
+circom/
+node_modules/
+*.zkey
+*.r1cs
+*.wasm
+*.wtns
+input.json
+proof.json
+public.json
+verification_key.json

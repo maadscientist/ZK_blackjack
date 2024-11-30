@@ -1,5 +1,6 @@
 {
   "dependencies": {
-    "elliptic": "^6.6.1"
+    "elliptic": "^6.6.1",
+    "snarkjs": "^0.7.5"
   }
 }
