@@ -26,11 +26,14 @@ class Dealer {
   setup_listeners() {
     // listen for any connection to the port
     this.io.on("connection", (socket) => {
+
+      this.io.emit("Connected!", {
+        message: "You have connected.",
+      });
+      
       console.log("Player connected");
       this.players.push(socket);
 
-      // initialize game when a player connects
-      
 
       // handle player actions - hit, stand
       socket.on("player-action", (action) => {
@@ -47,11 +50,14 @@ class Dealer {
 
       socket.on("player-declare-PK", (PK) => {
         //Needs to: read in player's public key (elliptic curve point object)
-
-        //Can only initialize game once we have player's public key.
+        // initialize game when a player connects
         if (this.players.length >= 1) {
           this.initialize_game();
         }
+        //Can only initialize game once we have player's public key.
+        // if (this.players.length >= 1) {
+        //   this.initialize_game();
+        // }
       });
 
       socket.on("player-unmask-card", (unmaskKey) => {
@@ -64,6 +70,8 @@ class Dealer {
         //Each card is an elliptic-curve point 
         //If there's a nice way to do it with JSON's or something, we could just read the whole deck rather than having to read each card and rebuild the deck :p
         //Player will also need one of these but the logic can be the exact same.
+
+        this.start_game(socket);
       });
 
     });
@@ -74,7 +82,7 @@ class Dealer {
     //Setup dealer's variables
     const ec = new EC("secp256k1");
 
-    this.dealer_cards = [];
+    this.dealer_card = -1;
     this.player_cards = [];
 
     const key = ec.genKeyPair()
@@ -105,34 +113,33 @@ class Dealer {
       message: "Player is shuffling...",
     });
 
-    this.deck.shuffle
+    this.deck.shuffle();
 
-    this.give_deck_to_player();
-    // TODO: Let player mask and shuffle deck
-    // Then - get deck back and game can begin.
+    this.send_deck();
+  }
 
-    // NOTE: I think I have the right way to draw the cards in handle_hit() function
+  /**
+   * This is called once the game has been initialized and the deck has been returned by the player.
+   */
+  start_game(socket){
+    // broadcast game start
+    this.io.emit("game-start", {
+      message: "Game is starting...",
+    });
+    //Dealer gets first card - *don't* unmask this one
+    this.dealer_card = this.cardsDrawnFromDeck; //Should be 0
+    this.cardsDrawnFromDeck++;
 
-    // TODO: dealer gets a card
-    // .
-    // .
-    // .
+    //Player gets the second card
+    this.handle_hit(socket);
 
-    // TODO: player gets a card
-    // we could also use the handle_hit() function to give the player a card
-    // .
-    // .
-    // .
 
     // TODO: unmask player's card
     this.io.emit("player-unmask", {
       message: "Player reveals the card...",
     });
 
-    // broadcast game start
-    this.io.emit("game-start", {
-      message: "Game is starting...",
-    });
+    
   }
 
   // helper for handling player actions
@@ -147,8 +154,7 @@ class Dealer {
     }
   }
 
-  //forPlayer is a boolean - if True player gets the card, if False dealer gets.
-  handle_hit(socket, forPlayer) {
+  handle_hit(socket) {
     // give player/dealer a card from the deck
     // we could also have a check - if the sum of JUST the players' cards (because we haven't revealed the dealer's card yet) is above 21, do not handle hit and declare the loss of the player
     
@@ -156,11 +162,10 @@ class Dealer {
     // First card dealt is card 0, then 1, 2, etc...
     const newCard = this.cardsDrawnFromDeck;
     this.cardsDrawnFromDeck += 1; 
-    if(forPlayer){
-      socket.emit("deal-card-player", [newCard]);
-    } else{
-      socket.emit("deal-card-dealer"[newCard])
-    }
+    socket.emit("deal-card-player", [newCard]);
+    this.player_cards.push(newCard);
+      // this.dealer_cards.push(newCard);
+
   }
 
   handle_stand(socket) {

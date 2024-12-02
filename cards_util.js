@@ -112,7 +112,18 @@ class Deck {
 
     //Subtract U to get back original card value :)
     const card_value = this.cards[card_index].B.add(U.neg());
+    this.get_original_value(card_value)
     return card_value;
+  }
+
+  //Private helper method - Brute force check to retrieve original value of the card.
+  get_original_value(card_value) {
+    for(let i = 1; i < 53; i++){
+      if(this.G.mul(i).eq(card_value)){
+        return i;
+      }
+    } 
+    return -1;
   }
 
   //These might be worthy of their own class but idk
