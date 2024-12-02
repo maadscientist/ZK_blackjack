@@ -283,7 +283,7 @@ function test_knowledge_proofs(ec) {
 
 const ec = new EC("secp256k1");
 // deck_setup_test(ec);
-test_knowledge_proofs(ec);
+// test_knowledge_proofs(ec);
 
 // ---------------------------------------------------
 
@@ -452,4 +452,10 @@ async function shuffle_test(elliptic_curve) {
   }
 }
 
-shuffle_test(ec).catch(console.error);
+// shuffle_test(ec).catch(console.error);
+
+// export classes
+module.exports = {
+  Card: Card,
+  Deck: Deck,
+};

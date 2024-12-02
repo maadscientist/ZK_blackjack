@@ -1,6 +1,9 @@
 {
   "dependencies": {
     "elliptic": "^6.6.1",
-    "snarkjs": "^0.7.5"
+    "express": "^4.21.1",
+    "snarkjs": "^0.7.5",
+    "socket.io": "^4.8.1",
+    "socket.io-client": "^4.8.1"
   }
 }
