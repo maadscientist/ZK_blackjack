@@ -92,6 +92,14 @@ class Deck {
     return maskingFactor; // not necessary to return/store but useful for testing
   }
 
+  //Masks all cards in the deck
+  mask_cards(){
+    for(let i = 0; i < 52; i++){
+      this.mask_card[i];
+    }
+  }
+
+
   get_unmask_key(card_index, secret_key) {
     return this.cards[card_index].A.mul(secret_key);
   }

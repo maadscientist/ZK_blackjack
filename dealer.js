@@ -30,9 +30,7 @@ class Dealer {
       this.players.push(socket);
 
       // initialize game when a player connects
-      if (this.players.length >= 1) {
-        this.initialize_game();
-      }
+      
 
       // handle player actions - hit, stand
       socket.on("player-action", (action) => {
@@ -44,12 +42,48 @@ class Dealer {
         this.players = this.players.filter((p) => p !== socket);
         console.log("Player disconnected");
       });
+
+      //TODO: Need sockets for:
+
+      socket.on("player-declare-PK", (PK) => {
+        //Needs to: read in player's public key (elliptic curve point object)
+
+        //Can only initialize game once we have player's public key.
+        if (this.players.length >= 1) {
+          this.initialize_game();
+        }
+      });
+
+      socket.on("player-unmask-card", (unmaskKey) => {
+        //Needs to: read in player's unmask key (is an elliptic curve point object)
+        
+      });
+
+      socket.on("player-give-deck", (deck) => {
+        //Needs to: read the whole deck of 52 cards
+        //Each card is an elliptic-curve point 
+        //If there's a nice way to do it with JSON's or something, we could just read the whole deck rather than having to read each card and rebuild the deck :p
+        //Player will also need one of these but the logic can be the exact same.
+      });
+
     });
   }
 
   initialize_game() {
-    // TODO: set up ec and public keys for deck
+
+    //Setup dealer's variables
     const ec = new EC("secp256k1");
+
+    this.dealer_cards = [];
+    this.player_cards = [];
+
+    const key = ec.genKeyPair()
+    this.publicKey = key.getPublic();
+    this.privateKey = key.getPrivate();
+
+    this.cardsDrawnFromDeck = 0;
+
+    // TODO: set up ec and public keys for deck
     const publicKeys = [];
 
     // create a shuffled deck
@@ -64,21 +98,18 @@ class Dealer {
     this.io.emit("player-mask", {
       message: "Player is masking...",
     });
+    this.deck.mask_cards();
 
     // TODO: p1 shuffle deck
     this.io.emit("player-shuffle", {
       message: "Player is shuffling...",
     });
 
-    // TODO: p2 mask deck
-    // .
-    // .
-    // .
+    this.deck.shuffle
 
-    // TODO: p2 shuffle deck
-    // .
-    // .
-    // .
+    this.give_deck_to_player();
+    // TODO: Let player mask and shuffle deck
+    // Then - get deck back and game can begin.
 
     // NOTE: I think I have the right way to draw the cards in handle_hit() function
 
@@ -116,11 +147,20 @@ class Dealer {
     }
   }
 
-  handle_hit(socket) {
-    // give player a card from the deck
+  //forPlayer is a boolean - if True player gets the card, if False dealer gets.
+  handle_hit(socket, forPlayer) {
+    // give player/dealer a card from the deck
     // we could also have a check - if the sum of JUST the players' cards (because we haven't revealed the dealer's card yet) is above 21, do not handle hit and declare the loss of the player
-    const newCard = this.deck.cards.pop();
-    socket.emit("deal-cards", [newCard]);
+    
+    // Both dealer and player have same copy of the deck, so just use indices to represent cards.
+    // First card dealt is card 0, then 1, 2, etc...
+    const newCard = this.cardsDrawnFromDeck;
+    this.cardsDrawnFromDeck += 1; 
+    if(forPlayer){
+      socket.emit("deal-card-player", [newCard]);
+    } else{
+      socket.emit("deal-card-dealer"[newCard])
+    }
   }
 
   handle_stand(socket) {
@@ -146,6 +186,23 @@ class Dealer {
       console.log(`Dealer server running on port ${port}`);
     });
   }
+
+  //TODO: Emit methods we need:
+  send_deck(){
+    //Emit deck in a way we can process
+  }
+  handle_unmask(socket, cardIndex){
+    //first - compute player's unmask key for that card index.
+    this.deck.get_unmask_key(cardIndex, this.privateKey)
+    //Need a way to send unmask key (Elliptic Curve point)
+  }
+
+  /**
+   * TOTAL UNMASK PROTOCOL SHOULD LOOK LIKE THIS:
+   * 1. Dealer sends the index of the card to unmask, along with their unmask_key. Starts listening for Player's response.
+   * 2. Player receives this and sends back index of card to unmask and their unmask key.
+   * 3. Dealer receives this, now both dealer and player can just call 
+   */
 }
 
 // start the dealer
