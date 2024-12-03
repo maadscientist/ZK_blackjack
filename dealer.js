@@ -26,14 +26,12 @@ class Dealer {
   setup_listeners() {
     // listen for any connection to the port
     this.io.on("connection", (socket) => {
-
-      this.io.emit("Connected!", {
+      this.io.emit("connected", {
         message: "You have connected.",
       });
-      
-      console.log("Player connected");
-      this.players.push(socket);
 
+      console.log("Player connected!");
+      this.players.push(socket);
 
       // handle player actions - hit, stand
       socket.on("player-action", (action) => {
@@ -43,49 +41,48 @@ class Dealer {
       // handle disconnection
       socket.on("disconnect", () => {
         this.players = this.players.filter((p) => p !== socket);
-        console.log("Player disconnected");
+        console.log("Player disconnected!");
       });
 
       //TODO: Need sockets for:
 
       socket.on("player-declare-PK", (PK) => {
         //Needs to: read in player's public key (elliptic curve point object)
+        console.log("Received Player's PK: ", PK);
         // initialize game when a player connects
-        if (this.players.length >= 1) {
+        //Can only initialize game once we have player's public key.
+        if (this.players.length >= 1 && PK != []) {
           this.initialize_game();
         }
-        //Can only initialize game once we have player's public key.
-        // if (this.players.length >= 1) {
-        //   this.initialize_game();
-        // }
+      });
+
+      socket.on("player-mask", (data) => {
+        console.log("Player has masked.");
+      });
+      socket.on("player-shuffle", (data) => {
+        console.log("Dealer has shuffled.");
       });
 
       socket.on("player-unmask-card", (unmaskKey) => {
         //Needs to: read in player's unmask key (is an elliptic curve point object)
-        
       });
 
-      socket.on("player-give-deck", (deck) => {
-        //Needs to: read the whole deck of 52 cards
-        //Each card is an elliptic-curve point 
-        //If there's a nice way to do it with JSON's or something, we could just read the whole deck rather than having to read each card and rebuild the deck :p
-        //Player will also need one of these but the logic can be the exact same.
-
-        this.start_game(socket);
+      socket.on("send-deck", (deck) => {
+        console.log("Received deck!");
+        // this.deck = deck;
+        // console.log("Deck received:", this.deck);
       });
-
     });
   }
 
   initialize_game() {
-
     //Setup dealer's variables
     const ec = new EC("secp256k1");
 
     this.dealer_card = -1;
     this.player_cards = [];
 
-    const key = ec.genKeyPair()
+    const key = ec.genKeyPair();
     this.publicKey = key.getPublic();
     this.privateKey = key.getPrivate();
 
@@ -102,26 +99,28 @@ class Dealer {
     // we need to handle them in the player.js file
     // we can implement the dealer actions in this file
 
-    // TODO: p1 mask deck
-    this.io.emit("player-mask", {
-      message: "Player is masking...",
-    });
+    // dealer masks
+    console.log("Dealer is masking...");
     this.deck.mask_cards();
+    console.log("Dealer has finished masking.");
+    this.io.emit("dealer-mask");
 
-    // TODO: p1 shuffle deck
-    this.io.emit("player-shuffle", {
-      message: "Player is shuffling...",
-    });
-
+    // dealer shuffles
+    console.log("Dealer is shuffling...");
     this.deck.shuffle();
+    console.log("Dealer has finished shuffling.");
+    this.io.emit("dealer-shuffle");
 
+    // send deck to player
+    console.log("Deck in hand:", this.deck);
+    console.log("Sending deck to player...");
     this.send_deck();
   }
 
   /**
    * This is called once the game has been initialized and the deck has been returned by the player.
    */
-  start_game(socket){
+  start_game(socket) {
     // broadcast game start
     this.io.emit("game-start", {
       message: "Game is starting...",
@@ -133,13 +132,10 @@ class Dealer {
     //Player gets the second card
     this.handle_hit(socket);
 
-
     // TODO: unmask player's card
     this.io.emit("player-unmask", {
       message: "Player reveals the card...",
     });
-
-    
   }
 
   // helper for handling player actions
@@ -157,15 +153,14 @@ class Dealer {
   handle_hit(socket) {
     // give player/dealer a card from the deck
     // we could also have a check - if the sum of JUST the players' cards (because we haven't revealed the dealer's card yet) is above 21, do not handle hit and declare the loss of the player
-    
+
     // Both dealer and player have same copy of the deck, so just use indices to represent cards.
     // First card dealt is card 0, then 1, 2, etc...
     const newCard = this.cardsDrawnFromDeck;
-    this.cardsDrawnFromDeck += 1; 
+    this.cardsDrawnFromDeck += 1;
     socket.emit("deal-card-player", [newCard]);
     this.player_cards.push(newCard);
-      // this.dealer_cards.push(newCard);
-
+    // this.dealer_cards.push(newCard);
   }
 
   handle_stand(socket) {
@@ -189,16 +184,19 @@ class Dealer {
   start_server(port) {
     this.server.listen(port, () => {
       console.log(`Dealer server running on port ${port}`);
+      console.log("Waiting for player to connect...");
     });
   }
 
   //TODO: Emit methods we need:
-  send_deck(){
+  send_deck() {
     //Emit deck in a way we can process
+    this.io.emit("send-deck", this.deck.pack_deck());
   }
-  handle_unmask(socket, cardIndex){
+
+  handle_unmask(socket, cardIndex) {
     //first - compute player's unmask key for that card index.
-    this.deck.get_unmask_key(cardIndex, this.privateKey)
+    this.deck.get_unmask_key(cardIndex, this.privateKey);
     //Need a way to send unmask key (Elliptic Curve point)
   }
 
@@ -206,7 +204,7 @@ class Dealer {
    * TOTAL UNMASK PROTOCOL SHOULD LOOK LIKE THIS:
    * 1. Dealer sends the index of the card to unmask, along with their unmask_key. Starts listening for Player's response.
    * 2. Player receives this and sends back index of card to unmask and their unmask key.
-   * 3. Dealer receives this, now both dealer and player can just call 
+   * 3. Dealer receives this, now both dealer and player can just call
    */
 }
 

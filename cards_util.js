@@ -19,6 +19,7 @@ class Deck {
   constructor(elliptic_curve, public_keys) {
     this.ec = elliptic_curve;
     this.G = ec.g; // generator
+    this.pks = public_keys;
 
     //Set up communal aggregate key.
     let aggregate = public_keys[0];
@@ -48,6 +49,21 @@ class Deck {
     };
 
     this.witness_data_init();
+  }
+
+  // pack the required values to send
+  pack_deck() {
+    // this sets original_deck = shuffled_deck and clears the shuffled_deck and permutations from the witness data
+    this.witness_data_init();
+    return {
+      // TODO: figure out how to send these
+      elliptic_curve: this.ec,
+      public_keys: this.pks,
+      cards: this.cards,
+
+      // this should be fine
+      witness_data: this.witness_data,
+    };
   }
 
   // initializes the orginal deck and permutations [0, ..., 52] for witness data
@@ -93,12 +109,11 @@ class Deck {
   }
 
   //Masks all cards in the deck
-  mask_cards(){
-    for(let i = 0; i < 52; i++){
+  mask_cards() {
+    for (let i = 0; i < 52; i++) {
       this.mask_card[i];
     }
   }
-
 
   get_unmask_key(card_index, secret_key) {
     return this.cards[card_index].A.mul(secret_key);
@@ -112,17 +127,17 @@ class Deck {
 
     //Subtract U to get back original card value :)
     const card_value = this.cards[card_index].B.add(U.neg());
-    this.get_original_value(card_value)
+    this.get_original_value(card_value);
     return card_value;
   }
 
   //Private helper method - Brute force check to retrieve original value of the card.
   get_original_value(card_value) {
-    for(let i = 1; i < 53; i++){
-      if(this.G.mul(i).eq(card_value)){
+    for (let i = 1; i < 53; i++) {
+      if (this.G.mul(i).eq(card_value)) {
         return i;
       }
-    } 
+    }
     return -1;
   }
 
