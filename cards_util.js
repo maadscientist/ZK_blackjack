@@ -4,15 +4,15 @@ const EC = require("elliptic").ec;
 const fs = require("fs");
 const path = require("path");
 const { exec } = require("child_process");
+const ec = new EC("secp256k1");
 
 class Card {
-  //Cards are represented with an A and a B value which are both points on the EC
-  //All cards start with an A-value of "1" and a B value of g^(1 to 52)
-  //However, by the time we get the card it may already be masked & shuffled so
+  // Cards are represented with an A and a B value which are both points on the EC
+  // All cards start with an A-value of "1" and a B value of g^(1 to 52)
+  // However, by the time we get the card it may already be masked & shuffled so
   constructor(A, B) {
-    this.A = A; //
-    this.B = B; //
-    // console.log(typeof(this.A));
+    this.A = A;
+    this.B = B;
   }
 }
 class Deck {
@@ -21,14 +21,14 @@ class Deck {
     this.G = ec.g; // generator
     this.pks = public_keys;
 
-    //Set up communal aggregate key.
+    // Set up communal aggregate key.
     let aggregate = public_keys[0];
     for (let i = 1; i < public_keys.length; i++) {
       aggregate = aggregate.add(public_keys[i]);
     }
     this.aggregateKey = aggregate;
 
-    //Create 52 cards
+    // Create 52 cards
     this.cards = [];
     this.originalCards = [];
     for (let i = 1; i < 53; i++) {
@@ -51,21 +51,6 @@ class Deck {
     this.witness_data_init();
   }
 
-  // pack the required values to send
-  pack_deck() {
-    // this sets original_deck = shuffled_deck and clears the shuffled_deck and permutations from the witness data
-    this.witness_data_init();
-    return {
-      // TODO: figure out how to send these
-      elliptic_curve: this.ec,
-      public_keys: this.pks,
-      cards: this.cards,
-
-      // this should be fine
-      witness_data: this.witness_data,
-    };
-  }
-
   // initializes the orginal deck and permutations [0, ..., 52] for witness data
   witness_data_init() {
     this.witness_data.original_deck = [];
@@ -79,21 +64,15 @@ class Deck {
   }
 
   mask_card(card_index) {
-    // not needed - used just for checks
-    // if (this.witness_data.shuffled_deck.length >= 52) {
-    //   console.warn("Attempting to mask more than 52 cards");
-    //   return null;
-    // }
-
-    //This is a slightly scuffed way to generate a random masking_factor mod q (q is order of EC)
-    keyPair = ec.genKeyPair();
+    // This is a slightly scuffed way to generate a random masking_factor mod q (q is order of EC)
+    const keyPair = ec.genKeyPair();
     const maskingFactor = keyPair.getPrivate();
     let cards = this.cards;
-    //Perform masking computations:
-    //new_a = a * g^r (r = maskingFactor)
+
+    // Perform masking computations
+
     this.G.add(cards[card_index].A);
-    cards[card_index].A = cards[card_index].A.add(this.G.mul(maskingFactor)); // could more efficient
-    //new_b = b * aggregateKey^r
+    cards[card_index].A = cards[card_index].A.add(this.G.mul(maskingFactor));
     cards[card_index].B = cards[card_index].B.add(
       this.aggregateKey.mul(maskingFactor)
     );
@@ -104,14 +83,13 @@ class Deck {
         cards[card_index].B.getX().toString()
       );
     }
-
     return maskingFactor; // not necessary to return/store but useful for testing
   }
 
-  //Masks all cards in the deck
+  // Masks all cards in the deck
   mask_cards() {
     for (let i = 0; i < 52; i++) {
-      this.mask_card[i];
+      this.mask_card(i);
     }
   }
 
@@ -125,42 +103,48 @@ class Deck {
       U = U.add(unmask_keys[i]);
     }
 
-    //Subtract U to get back original card value :)
+    // Subtract U to get back original card value :)
     const card_value = this.cards[card_index].B.add(U.neg());
-    this.get_original_value(card_value);
-    return card_value;
+    return this.get_original_value(card_value);
   }
 
-  //Private helper method - Brute force check to retrieve original value of the card.
+  // Private helper method - Brute force check to retrieve original value of the card.
   get_original_value(card_value) {
     for (let i = 1; i < 53; i++) {
       if (this.G.mul(i).eq(card_value)) {
-        return i;
+        if (i % 13 == 0) {
+          return 11;
+        } else if (i % 13 >= 10) {
+          return 10;
+        } else {
+          return (i % 13) + 1;
+        }
       }
     }
     return -1;
   }
 
-  //These might be worthy of their own class but idk
-  //Proves that log_g (A) = log_h (B)
+  // These might be worthy of their own class but idk
+  // Proves that log_g (A) = log_h (B)
   prove_knowledge(A, B, g, h, secret_key) {
     const secretKeyBigInt = BigInt("0x" + secret_key.toString("hex"));
 
-    //random k
+    // random k
     const randomBytes = new Uint8Array(256);
     crypto.getRandomValues(randomBytes);
     const hash1 = crypto.createHash("sha256").update(randomBytes).digest();
     const k = BigInt("0x" + hash1.toString("hex")) % BigInt(ec.curve.n);
     const k_BN = new BN(k.toString());
-    //Random challenge r mod q (verifier can also get this value)
+
+    // Random challenge r mod q (verifier can also get this value)
     const hash2 = crypto
       .createHash("sha256")
       .update(A.add(g).add(h).add(B).getX().toString())
       .digest();
+
     // Convert hash to a BigInt and mod by curve's order
     const random_challenge =
       BigInt("0x" + hash2.toString("hex")) % BigInt(this.ec.curve.n);
-    // console.log(random_challenge);
     return [
       g.mul(k_BN),
       h.mul(k_BN),
@@ -183,30 +167,11 @@ class Deck {
 
     const first_one_true = g.mul(proof).eq(I.add(A.mul(random_challenge)));
     const second_one_true = h.mul(proof).eq(J.add(B.mul(random_challenge)));
-    // console.log(random_challenge);;
-    // console.log(g.mul(proof).getX());
-    // console.log(I.add(A.mul(random_challenge)).getX());
-
-    // console.log(h.mul(proof).getX());
-    // console.log(J.add(B.mul(random_challenge)).getX());
-    // console.log((A.mul(random_challenge)).getX());
-    // console.log((B.mul(random_challenge)).getX());
     return first_one_true && second_one_true;
   }
 
   // wrapper for calling the proof generator
   async generate_shuffle_proof() {
-    // check deck lengths - might not be needed at all since it's initialized properly
-    // i ran into this error before initializing, so keeping this just in case
-    if (
-      this.witness_data.original_deck.length !== 52 ||
-      this.witness_data.shuffled_deck.length !== 52 ||
-      this.witness_data.permutation.length !== 52
-    ) {
-      this.witness_data_init();
-      throw new Error("Invalid deck lengths.");
-    }
-
     const proofGenerator = new ShuffleProofGenerator();
 
     try {
@@ -251,73 +216,100 @@ class Deck {
 
     return this;
   }
+
+  serializeDeck() {
+    let serializedCards = [];
+    for (let i = 0; i < this.cards.length; i++) {
+      serializedCards.push(Deck.serializeCard(this.cards[i]));
+    }
+    let serializedPKs = [];
+    for (let i = 0; i < this.pks.length; i++) {
+      serializedPKs.push(Deck.serializePoint(this.pks[i]));
+    }
+    this.witness_data_init();
+    const serializedDeck = {
+      public_keys: serializedPKs,
+      witness_data: this.witness_data,
+      cards: serializedCards,
+    };
+    return serializedDeck;
+  }
+
+  static reconstructDeck(serializedDeck) {
+    let new_cards = [];
+    for (let i = 0; i < serializedDeck.cards.length; i++) {
+      new_cards.push(Deck.reconstructCard(serializedDeck.cards[i]));
+    }
+    this.cards = new_cards;
+
+    let new_PKs = [];
+    for (let i = 0; i < serializedDeck.public_keys.length; i++) {
+      new_PKs.push(Deck.reconstructPoint(serializedDeck.public_keys[i]));
+    }
+
+    let d = new Deck(new EC("secp256k1"), new_PKs);
+    d.cards = new_cards;
+    d.originalCards = new_cards;
+    d.witness_data = serializedDeck.witness_data;
+    return d;
+  }
+
+  static serializePoint(point) {
+    const serializedPoint = {
+      x: point.getX().toString("hex"),
+      y: point.getY().toString("hex"),
+    };
+    return serializedPoint;
+  }
+  static reconstructPoint(data) {
+    const xBN = new BN(data.x, 16);
+    const yBN = new BN(data.y, 16);
+    const point = ec.curve.point(xBN, yBN);
+    return point;
+  }
+  static reconstructCard(serializedCard) {
+    let c = new Card();
+    c.A = this.reconstructPoint(serializedCard.A);
+    c.B = this.reconstructPoint(serializedCard.B);
+    return c;
+  }
+  static serializeCard(card) {
+    const serializedCard = {
+      A: this.serializePoint(card.A),
+      B: this.serializePoint(card.B),
+    };
+    return serializedCard;
+  }
 }
 
-// commented this out since this wasn't used anywhere
+function deck_setup_test(elliptic_curve) {
+  const G = elliptic_curve.g;
 
-// function deck_setup_test(elliptic_curve) {
-//   const G = elliptic_curve.g;
+  let secret_keys = [];
+  let public_keys = [];
+  for (let i = 0; i < 10; i++) {
+    keyPair = ec.genKeyPair();
+    secret_keys.push(keyPair.getPrivate());
+    public_keys.push(keyPair.getPublic());
+  }
 
-//   let secret_keys = [];
-//   let public_keys = [];
-//   for (let i = 0; i < 10; i++) {
-//     keyPair = ec.genKeyPair();
-//     secret_keys.push(keyPair.getPrivate());
-//     public_keys.push(keyPair.getPublic());
-//   }
+  deck = new Deck(elliptic_curve, public_keys);
 
-//   deck = new Deck(elliptic_curve, public_keys);
+  //mask cards
 
-//   //mask cards
-
-//   for (let i = 0; i < 10; i++) {
-//     maskingFactor = deck.mask_card(0);
-//   }
-
-//   //gen unmask key
-//   let unmask_keys = [];
-//   for (let i = 0; i < 10; i++) {
-//     unmask_keys.push(deck.get_unmask_key(0, secret_keys[i]));
-//   }
-
-//   console.log(" blah\n\n\n");
-//   console.log(deck.unmask(0, unmask_keys).getX());
-
-//   console.log("G\n\n\n");
-//   console.log(G.getX());
-// }
-
-function test_knowledge_proofs(ec) {
-  deck = new Deck(ec, []);
-
-  const testKeyPair = ec.genKeyPair();
-  const sk = testKeyPair.getPrivate();
-  const A = testKeyPair.getPublic();
-  const B = ec.g.mul(3).mul(sk);
-
-  const secretKeyBigInt = BigInt("0x" + sk.toString("hex"));
-  const secretKeyBN = new BN(secretKeyBigInt.toString());
-  // console.log(ec.g.mul(secretKeyBN).getX())
-  // console.log(ec.g.mul(sk).getX());
-
-  lis = deck.prove_knowledge(A, B, ec.g, ec.g.mul(3), sk); // dont ask
-  I1 = lis[0];
-  I2 = lis[1];
-  proof = lis[2];
-  let random_challenge = lis[3];
-  random_challenge = new BN(random_challenge.toString());
-
-  // console.log(proof);
-  proof = new BN(proof.toString());
-  // console.log(ec.g.mul(proof).getX())
-  // console.log(A.getX())
-  // console.log(A.mul(random_challenge).getX())
-  console.log(deck.verify_proof(A, B, ec.g, ec.g.mul(3), I1, I2, proof));
+  for (let i = 0; i < 10; i++) {
+    maskingFactor = deck.mask_cards();
+  }
+  deck.shuffle();
+  const card_to_unmask = 5;
+  //gen unmask key
+  let unmask_keys = [];
+  for (let i = 0; i < 10; i++) {
+    unmask_keys.push(deck.get_unmask_key(card_to_unmask, secret_keys[i]));
+  }
 }
 
-const ec = new EC("secp256k1");
 // deck_setup_test(ec);
-// test_knowledge_proofs(ec);
 
 // ---------------------------------------------------
 
@@ -325,6 +317,7 @@ class ShuffleProofGenerator {
   constructor() {
     // file paths for different files used in proof
     this.circuit_path = path.join(__dirname, "circuit.circom");
+    this.wasm_path = path.join(__dirname, "circuit_js/circuit.wasm");
     this.witness_path = path.join(__dirname, "input.json");
     this.proof_path = path.join(__dirname, "proof.json");
     this.public_path = path.join(__dirname, "public.json");
@@ -375,11 +368,9 @@ class ShuffleProofGenerator {
           `snarkjs zkey contribute ${gkey_path} ${pkey_path}`
         );
 
-        process.stdin.pipe(contribute.stdin); // receive input
+        console.log("Enter a random text. (Entropy):");
 
-        contribute.stdout.on("data", (data) => {
-          console.log(data);
-        });
+        process.stdin.pipe(contribute.stdin); // receive input
 
         contribute.on("close", (code) => {
           if (code === 0) {
@@ -400,7 +391,7 @@ class ShuffleProofGenerator {
 
         // compile input.json to a .wtns file
         await runCommand(
-          `snarkjs wtns calculate ${this.circuit_name}.wasm ${this.witness_path} ${this.witness_name}.wtns`
+          `snarkjs wtns calculate ${this.wasm_path} ${this.witness_path} ${this.witness_name}.wtns`
         );
         console.log("Compiled witness!");
 
@@ -409,7 +400,6 @@ class ShuffleProofGenerator {
           `snarkjs groth16 setup ${this.circuit_name}.r1cs powersOfTau28_hez_final_10.ptau ${this.gkey_path}`
         );
 
-        console.log(this.gkey_path);
         // generate proving key
         await runZkeyContribute(this.gkey_path, this.pkey_path);
         console.log("Proving key generated!");
@@ -424,7 +414,7 @@ class ShuffleProofGenerator {
         );
         console.log("Proof generated!");
 
-        // verify proof (ALWAYS TRUE!!!!!!!)
+        // verify proof
         console.log("Verifying proof....");
         await runCommand(
           `snarkjs groth16 verify ${this.vkey_path} ${this.public_path} ${this.proof_path}`
@@ -445,8 +435,8 @@ class ShuffleProofGenerator {
       this.witness_path,
       this.proof_path,
       this.public_path,
+      this.wasm_path,
       `${this.circuit_name}.r1cs`,
-      `${this.circuit_name}.wasm`,
       `${this.witness_name}.wtns`,
       this.gkey_path,
       this.pkey_path,
@@ -479,8 +469,8 @@ async function shuffle_test(elliptic_curve) {
   deck.shuffle();
 
   try {
-    const shuffleProof = await deck.generate_shuffle_proof();
-    console.log("Shuffle Proof Generated:", shuffleProof);
+    await deck.generate_shuffle_proof();
+    console.error("Success.");
   } catch (error) {
     console.error("TEST FAILED!!");
   }

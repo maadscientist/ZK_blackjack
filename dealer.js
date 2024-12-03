@@ -29,8 +29,9 @@ class Dealer {
       this.io.emit("connected", {
         message: "You have connected.",
       });
-
+      console.log("-------------------------------------");
       console.log("Player connected!");
+      console.log("-------------------------------------");
       this.players.push(socket);
 
       // handle player actions - hit, stand
@@ -42,16 +43,19 @@ class Dealer {
       socket.on("disconnect", () => {
         this.players = this.players.filter((p) => p !== socket);
         console.log("Player disconnected!");
+        console.log("-------------------------------------");
+        process.exit();
       });
 
-      //TODO: Need sockets for:
+      socket.on("player-declare-PK", (message) => {
+        // read in player's public key (elliptic curve point object)
+        this.player_PK = Deck.reconstructPoint(message.publicKey);
+        console.log("Received Player's PK: ", this.player_PK.getX());
+        console.log("-------------------------------------");
 
-      socket.on("player-declare-PK", (PK) => {
-        //Needs to: read in player's public key (elliptic curve point object)
-        console.log("Received Player's PK: ", PK);
         // initialize game when a player connects
         //Can only initialize game once we have player's public key.
-        if (this.players.length >= 1 && PK != []) {
+        if (this.players.length >= 1 && this.player_PK != []) {
           this.initialize_game();
         }
       });
@@ -60,17 +64,26 @@ class Dealer {
         console.log("Player has masked.");
       });
       socket.on("player-shuffle", (data) => {
-        console.log("Dealer has shuffled.");
-      });
-
-      socket.on("player-unmask-card", (unmaskKey) => {
-        //Needs to: read in player's unmask key (is an elliptic curve point object)
+        console.log("Player has shuffled.");
+        console.log("-------------------------------------");
       });
 
       socket.on("send-deck", (deck) => {
         console.log("Received deck!");
-        // this.deck = deck;
-        // console.log("Deck received:", this.deck);
+        console.log("-------------------------------------");
+        this.deck = Deck.reconstructDeck(deck);
+        this.start_game(socket);
+        console.log("GAME STARTED!");
+      });
+
+      socket.on("result", (data) => {
+        console.log("-------------------------------------");
+        if (data == 1) {
+          console.log("Player won.");
+        } else {
+          console.log("Player lost.");
+        }
+        console.log("-------------------------------------");
       });
     });
   }
@@ -86,34 +99,40 @@ class Dealer {
     this.publicKey = key.getPublic();
     this.privateKey = key.getPrivate();
 
+    //send dealer PK
+    const PK_serialized = Deck.serializePoint(this.publicKey);
+
+    this.io.emit("dealer-declare-PK", {
+      publicKey: PK_serialized,
+    });
+
     this.cardsDrawnFromDeck = 0;
 
-    // TODO: set up ec and public keys for deck
-    const publicKeys = [];
+    // set up ec and public keys for deck
+    const publicKeys = [this.publicKey, this.player_PK];
 
     // create a shuffled deck
     this.deck = new Deck(ec, publicKeys);
-    this.deck.shuffle();
 
     // NOTE: all implementations except hits for the player are emitted as an event
     // we need to handle them in the player.js file
     // we can implement the dealer actions in this file
 
     // dealer masks
-    console.log("Dealer is masking...");
     this.deck.mask_cards();
+
     console.log("Dealer has finished masking.");
     this.io.emit("dealer-mask");
 
     // dealer shuffles
-    console.log("Dealer is shuffling...");
     this.deck.shuffle();
     console.log("Dealer has finished shuffling.");
+    console.log("-------------------------------------");
     this.io.emit("dealer-shuffle");
 
     // send deck to player
-    console.log("Deck in hand:", this.deck);
     console.log("Sending deck to player...");
+    console.log("-------------------------------------");
     this.send_deck();
   }
 
@@ -122,20 +141,13 @@ class Dealer {
    */
   start_game(socket) {
     // broadcast game start
-    this.io.emit("game-start", {
-      message: "Game is starting...",
-    });
+    this.io.emit("game-start");
     //Dealer gets first card - *don't* unmask this one
     this.dealer_card = this.cardsDrawnFromDeck; //Should be 0
     this.cardsDrawnFromDeck++;
 
     //Player gets the second card
     this.handle_hit(socket);
-
-    // TODO: unmask player's card
-    this.io.emit("player-unmask", {
-      message: "Player reveals the card...",
-    });
   }
 
   // helper for handling player actions
@@ -143,9 +155,12 @@ class Dealer {
     switch (action.type) {
       case "hit":
         this.handle_hit(socket);
+        console.log("Player chooses to HIT");
         break;
       case "stand":
         this.handle_stand(socket);
+        console.log("Player chooses to STAND");
+
         break;
     }
   }
@@ -159,53 +174,40 @@ class Dealer {
     const newCard = this.cardsDrawnFromDeck;
     this.cardsDrawnFromDeck += 1;
     socket.emit("deal-card-player", [newCard]);
+
     this.player_cards.push(newCard);
-    // this.dealer_cards.push(newCard);
+    this.handle_unmask(socket, newCard);
   }
 
   handle_stand(socket) {
-    // TODO: implement stand logic
-    // 1. reveals dealer's card
-    // 2. add all values of player's cards and dealer's card
-    // 3. call determine_winner
-  }
-
-  determine_winner() {
-    // TODO: implement winner determination logic
-    // check if sum <= 21
-    // if yes, winner is player
-    // if no, winner is dealer
-    this.io.emit("game-result", {
-      winner: null,
-    });
+    socket.emit("reveal-dealer-card", [this.dealer_card]);
+    this.handle_unmask(socket, this.dealer_card);
   }
 
   // listens on port 3000
   start_server(port) {
     this.server.listen(port, () => {
+      console.log("-------------------------------------");
       console.log(`Dealer server running on port ${port}`);
       console.log("Waiting for player to connect...");
+      console.log("-------------------------------------");
     });
   }
 
-  //TODO: Emit methods we need:
   send_deck() {
     //Emit deck in a way we can process
-    this.io.emit("send-deck", this.deck.pack_deck());
+    this.io.emit("send-deck", this.deck.serializeDeck());
   }
 
   handle_unmask(socket, cardIndex) {
     //first - compute player's unmask key for that card index.
-    this.deck.get_unmask_key(cardIndex, this.privateKey);
-    //Need a way to send unmask key (Elliptic Curve point)
+    const unmask_key = this.deck.get_unmask_key(cardIndex, this.privateKey);
+    const unmask_key_serialized = Deck.serializePoint(unmask_key);
+    this.io.emit("dealer-unmask-card", {
+      cardIndex: cardIndex,
+      unmaskKey: unmask_key_serialized,
+    });
   }
-
-  /**
-   * TOTAL UNMASK PROTOCOL SHOULD LOOK LIKE THIS:
-   * 1. Dealer sends the index of the card to unmask, along with their unmask_key. Starts listening for Player's response.
-   * 2. Player receives this and sends back index of card to unmask and their unmask key.
-   * 3. Dealer receives this, now both dealer and player can just call
-   */
 }
 
 // start the dealer

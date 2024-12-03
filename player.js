@@ -1,6 +1,5 @@
 const io = require("socket.io-client");
 const { Deck, Card } = require("./cards_util");
-// we're taking input via console
 const readline = require("readline");
 const EC = require("elliptic").ec;
 
@@ -18,72 +17,110 @@ class Player {
     this.setup_console();
 
     this.ec = new EC("secp256k1");
+    this.game_ending = false;
   }
 
   setup_listeners() {
     // game initialization
     this.socket.on("connected", (data) => {
-      console.log("Successfully connected - sending public key...");
+      console.log("-------------------------------------");
+      console.log("Successfully connected!");
+      console.log("-------------------------------------");
       this.handle_public_key(this.socket);
     });
-    // game initialization
+
     this.socket.on("game-start", (data) => {
-      console.log("Game started!");
+      console.log("GAME STARTED!");
     });
+
     this.socket.on("dealer-mask", (data) => {
       console.log("Dealer has masked.");
     });
+
     this.socket.on("dealer-shuffle", (data) => {
       console.log("Dealer has shuffled.");
-    });
-
-    // receive game result
-    this.socket.on("game-result", (result) => {
-      console.log("Game result:", result);
+      console.log("-------------------------------------");
     });
 
     this.socket.on("deal-card-player", (card) => {
+      console.log("-------------------------------------");
+      console.log("You've drawn a card.");
       this.hand.push(card);
     });
 
-    //TODO: Need sockets for:
-
-    this.socket.on("dealer-declare-PK", (PK) => {
-      //Needs to: read in dealer's public key (elliptic curve point object)
+    this.socket.on("reveal-dealer-card", (card) => {
+      console.log("Revealing dealer's card!");
+      this.hand.push(card);
+      this.game_ending = true;
     });
 
-    this.socket.on("dealer-unmask-card", (unmaskKey) => {
-      //Needs to: read in dealer's unmask key (is an elliptic curve point object)
-      //Dealer also has a version - logic can be the same
+    this.socket.on("dealer-declare-PK", (message) => {
+      // read in dealer's public key (elliptic curve point object)
+      this.dealer_PK = Deck.reconstructPoint(message.publicKey);
+      console.log("Received Dealer's PK: ", this.dealer_PK.getX());
+      console.log("-------------------------------------");
+    });
+
+    this.socket.on("dealer-unmask-card", (cardAndKey) => {
+      // read in dealer's unmask key (is an elliptic curve point object)
+      // Dealer also has a version - logic can be the same
+      const cardIndex = cardAndKey.cardIndex;
+      const unmaskKey = Deck.reconstructPoint(cardAndKey.unmaskKey);
+      const unmaskKey2 = this.deck.get_unmask_key(cardIndex, this.privateKey);
+      console.log("Unmasking card...");
+
+      const card = this.deck.unmask(cardIndex, [unmaskKey, unmaskKey2]);
+      console.log("Revealed: " + card);
+      this.hand_values.push(card);
+      console.log("Your hand: ", this.hand_values);
+      console.log("Your current total: ", this.calculate_current_total());
+      console.log("-------------------------------------");
+      if (this.game_ending) {
+        if (
+          this.calculate_current_total() <= 21 &&
+          this.calculate_current_total() >= 15
+        ) {
+          console.log("You Win! :)");
+          console.log("-------------------------------------");
+          this.socket.emit("result", 1);
+          this.socket.disconnect();
+          process.exit();
+        } else {
+          console.log("You Lose! :(");
+          console.log("-------------------------------------");
+          this.socket.emit("result", 0);
+          this.socket.disconnect();
+          process.exit();
+        }
+      } else {
+        console.log("Hit or stand?");
+      }
     });
 
     // receives the deck from dealer and parses it
     this.socket.on("send-deck", (data) => {
       console.log("Received deck!");
-      // console.log(data);
+      console.log("-------------------------------------");
 
-      this.deck = this.unpack_deck(data);
-      console.log(this.deck);
+      this.deck = Deck.reconstructDeck(data);
 
-      // After initializing deck, uncomment this
-      /*
-      console.log("Deck received:", this.deck);
       // dealer masks
-      console.log("Player is masking...");
-      this.deck;
+      this.deck.mask_cards();
+
       console.log("Player has finished masking.");
       this.socket.emit("player-mask");
 
       // dealer shuffles
-      console.log("Player is shuffling...");
       this.deck.shuffle();
+
       console.log("Player has finished shuffling.");
+      console.log("-------------------------------------");
       this.socket.emit("player-shuffle");
 
       // send deck to player
-      // console.log("Deck in hand:", this.deck);
       console.log("Sending deck to dealer...");
-      this.send_deck();*/
+      console.log("-------------------------------------");
+      this.send_deck(this.socket);
     });
   }
 
@@ -110,53 +147,28 @@ class Player {
     });
   }
 
-  unpack_deck(data) {
-    // this is the logic, will have to alter to work properly
-    const elliptic_curve = data.elliptic_curve;
-    const public_keys = data.public_keys;
-
-    const deck = new Deck(elliptic_curve, public_keys);
-
-    deck.cards = data.cards;
-    deck.originalCards = data.cards;
-    deck.witness_data = data.witness_data;
-
-    return deck;
-  }
-
   handle_public_key(socket) {
     const key = this.ec.genKeyPair();
-    this.public_key = key.getPublic();
+    this.publicKey = key.getPublic();
     this.privateKey = key.getPrivate();
-    //EMIT PUBLIC KEY :)
-    socket.emit("player-declare-PK", this.public_key);
+    // EMIT PUBLIC KEY :)
+    const PK_serialized = Deck.serializePoint(this.publicKey);
+    socket.emit("player-declare-PK", {
+      publicKey: PK_serialized,
+    });
   }
 
   calculate_current_total() {
     let total = 0;
-    for (let i = 0; i < this.hand_values; i++) {
+    for (let i = 0; i < this.hand_values.length; i++) {
       total += this.hand_values[i];
     }
     return total;
   }
 
-  //TODO: Emit methods we need:
-  send_deck() {
-    //Emit deck in a way we can process
-    this.io.emit("send-deck", this.deck.pack_deck());
-  }
-
-  handle_unmask(socket, cardIndex, dealerUnmaskKey) {
-    //No need to check here if the card has been dealt yet
-
-    //first - compute player's unmask key for that card index.
-    unmask_key = this.deck.get_unmask_key(cardIndex, this.privateKey);
-    //TODO: send_unmask_key
-    const keys = [unmaskKey, dealerUnmaskKey];
-    const actual_value = this.deck.unmask(cardIndex, keys);
-    this.hand_values.push(actual_value);
-    console.log("current total:");
-    console.log(this.calculate_current_total());
+  send_deck(socket) {
+    // Emit deck in a way we can process
+    socket.emit("send-deck", this.deck.serializeDeck());
   }
 }
 

@@ -1,5 +1,7 @@
 circom/
 node_modules/
+test/
+circuit_js/
 *.zkey
 *.r1cs
 *.wasm
