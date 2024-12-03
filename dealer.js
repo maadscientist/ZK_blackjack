@@ -69,9 +69,11 @@ class Dealer {
       });
 
       socket.on("send-deck", (deck) => {
-        console.log("Received deck!");
+        console.log("Received deck and proof!");
         console.log("-------------------------------------");
         this.deck = Deck.reconstructDeck(deck);
+        this.deck.verify_shuffle_proof();
+        console.log("-------------------------------------");
         this.start_game(socket);
         console.log("GAME STARTED!");
       });
@@ -89,7 +91,7 @@ class Dealer {
   }
 
   initialize_game() {
-    //Setup dealer's variables
+    // Setup dealer's variables
     const ec = new EC("secp256k1");
 
     this.dealer_card = -1;
@@ -128,10 +130,14 @@ class Dealer {
     this.deck.shuffle();
     console.log("Dealer has finished shuffling.");
     console.log("-------------------------------------");
+
+    console.log("Generating proof...");
+    this.deck.generate_shuffle_proof();
+    console.log("-------------------------------------");
     this.io.emit("dealer-shuffle");
 
     // send deck to player
-    console.log("Sending deck to player...");
+    console.log("Sending deck and proof to player...");
     console.log("-------------------------------------");
     this.send_deck();
   }
@@ -142,11 +148,11 @@ class Dealer {
   start_game(socket) {
     // broadcast game start
     this.io.emit("game-start");
-    //Dealer gets first card - *don't* unmask this one
+    // Dealer gets first card - *don't* unmask this one
     this.dealer_card = this.cardsDrawnFromDeck; //Should be 0
     this.cardsDrawnFromDeck++;
 
-    //Player gets the second card
+    // Player gets the second card
     this.handle_hit(socket);
   }
 
@@ -195,12 +201,12 @@ class Dealer {
   }
 
   send_deck() {
-    //Emit deck in a way we can process
+    // Emit deck in a way we can process
     this.io.emit("send-deck", this.deck.serializeDeck());
   }
 
   handle_unmask(socket, cardIndex) {
-    //first - compute player's unmask key for that card index.
+    // first - compute player's unmask key for that card index.
     const unmask_key = this.deck.get_unmask_key(cardIndex, this.privateKey);
     const unmask_key_serialized = Deck.serializePoint(unmask_key);
     this.io.emit("dealer-unmask-card", {

@@ -8,8 +8,8 @@ class Player {
   constructor(serverUrl = "http://localhost:3000") {
     this.socket = io(serverUrl);
     this.deck = null;
-    //hand stores the raw 'indices' of the cards
-    //hand_values stores the actual values of the cards once they are unmasked.
+    // hand stores the raw 'indices' of the cards
+    // hand_values stores the actual values of the cards once they are unmasked.
     this.hand = [];
     this.hand_values = [];
 
@@ -99,10 +99,13 @@ class Player {
 
     // receives the deck from dealer and parses it
     this.socket.on("send-deck", (data) => {
-      console.log("Received deck!");
+      console.log("Received deck and proof!");
       console.log("-------------------------------------");
 
       this.deck = Deck.reconstructDeck(data);
+
+      this.deck.verify_shuffle_proof();
+      console.log("-------------------------------------");
 
       // dealer masks
       this.deck.mask_cards();
@@ -115,10 +118,14 @@ class Player {
 
       console.log("Player has finished shuffling.");
       console.log("-------------------------------------");
+
+      console.log("Generating proof...");
+      this.deck.generate_shuffle_proof();
+      console.log("-------------------------------------");
       this.socket.emit("player-shuffle");
 
       // send deck to player
-      console.log("Sending deck to dealer...");
+      console.log("Sending deck and proof to dealer...");
       console.log("-------------------------------------");
       this.send_deck(this.socket);
     });

@@ -3,7 +3,7 @@ const BN = require("bn.js");
 const EC = require("elliptic").ec;
 const fs = require("fs");
 const path = require("path");
-const { exec } = require("child_process");
+const { execSync, spawnSync } = require("child_process");
 const ec = new EC("secp256k1");
 
 class Card {
@@ -171,7 +171,7 @@ class Deck {
   }
 
   // wrapper for calling the proof generator
-  async generate_shuffle_proof() {
+  generate_shuffle_proof() {
     const proofGenerator = new ShuffleProofGenerator();
 
     try {
@@ -186,11 +186,19 @@ class Deck {
         this.witness_data.permutation
       );
 
-      console.log("Witness written!");
+      proofGenerator.generate_proof();
+    } catch (error) {
+      console.error("Shuffle proof generation error:", error);
+      throw error;
+    }
+  }
 
-      const proof = await proofGenerator.generate_proof();
+  // wrapper for calling the proof generator
+  verify_shuffle_proof() {
+    const proofGenerator = new ShuffleProofGenerator();
 
-      return proof;
+    try {
+      proofGenerator.verify_proof();
     } catch (error) {
       console.error("Shuffle proof generation error:", error);
       throw error;
@@ -199,6 +207,7 @@ class Deck {
 
   // shuffle by exchanging current card's position w/ a random card
   shuffle() {
+    this.witness_data.original_deck = [];
     this.witness_data.shuffled_deck = [];
 
     for (let i = this.cards.length - 1; i > 0; i--) {
@@ -209,6 +218,9 @@ class Deck {
     // note the shuffled deck and permutations down
     for (let i = 0; i < 52; i++) {
       this.witness_data.shuffled_deck.push(this.cards[i].B.getX().toString());
+      this.witness_data.original_deck.push(
+        this.originalCards[i].B.getX().toString()
+      );
       this.witness_data.permutation[i] = this.cards.indexOf(
         this.originalCards[i]
       );
@@ -240,7 +252,8 @@ class Deck {
     for (let i = 0; i < serializedDeck.cards.length; i++) {
       new_cards.push(Deck.reconstructCard(serializedDeck.cards[i]));
     }
-    this.cards = new_cards;
+    // this.cards = new_cards;
+    // this.originalCards = new_cards;
 
     let new_PKs = [];
     for (let i = 0; i < serializedDeck.public_keys.length; i++) {
@@ -343,90 +356,90 @@ class ShuffleProofGenerator {
     fs.writeFileSync(this.witness_path, JSON.stringify(witnessData, null, 2));
   }
 
-  generate_proof() {
-    // helper function to run commands and wait for completion
-    // helps with in order execution
-    function runCommand(command) {
-      return new Promise((resolve, reject) => {
-        exec(command, (error, stdout, stderr) => {
-          if (error) {
-            reject(`Command failed: ${error.message}`);
-            return;
-          }
-          if (stderr) {
-            console.error(`stderr: ${stderr}`);
-          }
-          resolve(stdout); // resolve promise when command completes
-        });
-      });
-    }
-
-    // helper function to handle zkey contribute with user input
-    function runZkeyContribute(gkey_path, pkey_path) {
-      return new Promise((resolve, reject) => {
-        const contribute = exec(
-          `snarkjs zkey contribute ${gkey_path} ${pkey_path}`
-        );
-
-        console.log("Enter a random text. (Entropy):");
-
-        process.stdin.pipe(contribute.stdin); // receive input
-
-        contribute.on("close", (code) => {
-          if (code === 0) {
-            resolve();
-          } else {
-            reject(`Zkey contribute failed with code ${code}`);
-          }
-        });
-      });
-    }
-
-    // run all commands for proof generation and verification
-    return new Promise(async (resolve, reject) => {
-      try {
-        // compile the circom circuit
-        await runCommand(`circom ${this.circuit_path} --r1cs --wasm`);
-        console.log("Compiled circom circuit!");
-
-        // compile input.json to a .wtns file
-        await runCommand(
-          `snarkjs wtns calculate ${this.wasm_path} ${this.witness_path} ${this.witness_name}.wtns`
-        );
-        console.log("Compiled witness!");
-
-        // setup groth16, pls dont ask
-        await runCommand(
-          `snarkjs groth16 setup ${this.circuit_name}.r1cs powersOfTau28_hez_final_10.ptau ${this.gkey_path}`
-        );
-
-        // generate proving key
-        await runZkeyContribute(this.gkey_path, this.pkey_path);
-        console.log("Proving key generated!");
-
-        // generate verification key
-        await runCommand(`snarkjs zkev ${this.pkey_path} ${this.vkey_path}`);
-        console.log("Verification key generated!");
-
-        // generate proof
-        await runCommand(
-          `snarkjs groth16 prove ${this.pkey_path} ${this.witness_name}.wtns ${this.proof_path} ${this.public_path}`
-        );
-        console.log("Proof generated!");
-
-        // verify proof
-        console.log("Verifying proof....");
-        await runCommand(
-          `snarkjs groth16 verify ${this.vkey_path} ${this.public_path} ${this.proof_path}`
-        );
-
-        // read the proof from the file to resolve
-        const proof = JSON.parse(fs.readFileSync(this.proof_path, "utf8"));
-        resolve(proof);
-      } catch (error) {
-        reject(error);
+  verify_proof() {
+    try {
+      // Helper function for running a command synchronously
+      function runCommandSync(command) {
+        try {
+          execSync(command, { encoding: "utf-8" });
+        } catch (error) {
+          console.error(`Command failed: ${command}`);
+          throw new Error(error.message);
+        }
       }
-    });
+
+      // Verify proof
+      console.log("Verifying shuffle proof...");
+      runCommandSync(
+        `snarkjs groth16 verify ${this.vkey_path} ${this.public_path} ${this.proof_path}`
+      );
+      console.log("Proof verification successful!");
+    } catch (error) {
+      console.error("Error during proof verification:", error.message);
+      throw error;
+    }
+  }
+
+  generate_proof() {
+    try {
+      // Helper function for running a command synchronously
+      function runCommandSync(command) {
+        try {
+          execSync(command, { encoding: "utf-8" });
+        } catch (error) {
+          console.error(`Command failed: ${command}`);
+          throw new Error(error.message);
+        }
+      }
+
+      // Helper function for synchronous user input during zkey contribution
+      function runZkeyContributeSync(gkey_path, pkey_path) {
+        try {
+          execSync(`snarkjs zkey contribute ${gkey_path} ${pkey_path}`, {
+            stdio: "inherit",
+          });
+        } catch (error) {
+          throw new Error(`Zkey contribute failed: ${error.message}`);
+        }
+      }
+
+      // Compile the circom circuit
+      runCommandSync(`circom ${this.circuit_path} --r1cs --wasm`);
+      console.log("Compiled circom circuit!");
+
+      // Compile input.json to a .wtns file
+      runCommandSync(
+        `snarkjs wtns calculate ${this.wasm_path} ${this.witness_path} ${this.witness_name}.wtns`
+      );
+      console.log("Compiled witness!");
+
+      // Setup groth16
+      runCommandSync(
+        `snarkjs groth16 setup ${this.circuit_name}.r1cs powersOfTau28_hez_final_10.ptau ${this.gkey_path}`
+      );
+      console.log("Groth16 setup completed!");
+
+      // Generate proving key
+      runZkeyContributeSync(this.gkey_path, this.pkey_path);
+      console.log("Proving key generated!");
+
+      // Generate verification key
+      runCommandSync(`snarkjs zkev ${this.pkey_path} ${this.vkey_path}`);
+      console.log("Verification key generated!");
+
+      // Generate proof
+      runCommandSync(
+        `snarkjs groth16 prove ${this.pkey_path} ${this.witness_name}.wtns ${this.proof_path} ${this.public_path}`
+      );
+      console.log("Proof generated!");
+
+      // Read the proof from the file
+      const proof = JSON.parse(fs.readFileSync(this.proof_path, "utf8"));
+      return proof;
+    } catch (error) {
+      console.error("Error during proof generation:", error.message);
+      throw error;
+    }
   }
 
   // removes witness, proof, key, statement and circuit files
