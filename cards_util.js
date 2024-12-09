@@ -5,6 +5,7 @@ const fs = require("fs");
 const path = require("path");
 const { execSync, spawnSync } = require("child_process");
 const ec = new EC("secp256k1");
+const { performance } = require("perf_hooks");
 
 class Card {
   // Cards are represented with an A and a B value which are both points on the EC
@@ -193,7 +194,7 @@ class Deck {
     }
   }
 
-  // wrapper for calling the proof generator
+  // wrapper for calling the proof verifier
   verify_shuffle_proof() {
     const proofGenerator = new ShuffleProofGenerator();
 
@@ -229,6 +230,7 @@ class Deck {
     return this;
   }
 
+  // serialize deck before sending
   serializeDeck() {
     let serializedCards = [];
     for (let i = 0; i < this.cards.length; i++) {
@@ -247,6 +249,7 @@ class Deck {
     return serializedDeck;
   }
 
+  // deserialize deck after receiving
   static reconstructDeck(serializedDeck) {
     let new_cards = [];
     for (let i = 0; i < serializedDeck.cards.length; i++) {
@@ -295,6 +298,7 @@ class Deck {
   }
 }
 
+// test function
 function deck_setup_test(elliptic_curve) {
   const G = elliptic_curve.g;
 
@@ -358,6 +362,7 @@ class ShuffleProofGenerator {
 
   verify_proof() {
     try {
+      const startTime = performance.now();
       // Helper function for running a command synchronously
       function runCommandSync(command) {
         try {
@@ -373,7 +378,13 @@ class ShuffleProofGenerator {
       runCommandSync(
         `snarkjs groth16 verify ${this.vkey_path} ${this.public_path} ${this.proof_path}`
       );
+
+      const endTime = performance.now();
+
       console.log("Proof verification successful!");
+      console.log(
+        `Proof verification took ${endTime - startTime} milliseconds.`
+      );
     } catch (error) {
       console.error("Error during proof verification:", error.message);
       throw error;
@@ -403,6 +414,7 @@ class ShuffleProofGenerator {
         }
       }
 
+      const witnessStartTime = performance.now();
       // Compile the circom circuit
       runCommandSync(`circom ${this.circuit_path} --r1cs --wasm`);
       console.log("Compiled circom circuit!");
@@ -411,7 +423,13 @@ class ShuffleProofGenerator {
       runCommandSync(
         `snarkjs wtns calculate ${this.wasm_path} ${this.witness_path} ${this.witness_name}.wtns`
       );
+      const witnessEndTime = performance.now();
       console.log("Compiled witness!");
+      console.log(
+        `Witness generation took ${
+          witnessEndTime - witnessStartTime
+        } milliseconds.`
+      );
 
       // Setup groth16
       runCommandSync(
@@ -427,14 +445,24 @@ class ShuffleProofGenerator {
       runCommandSync(`snarkjs zkev ${this.pkey_path} ${this.vkey_path}`);
       console.log("Verification key generated!");
 
+      const proofGenStartTime = performance.now();
       // Generate proof
       runCommandSync(
         `snarkjs groth16 prove ${this.pkey_path} ${this.witness_name}.wtns ${this.proof_path} ${this.public_path}`
       );
-      console.log("Proof generated!");
 
       // Read the proof from the file
       const proof = JSON.parse(fs.readFileSync(this.proof_path, "utf8"));
+      const proofGenEndTime = performance.now();
+
+      console.log("Proof generated!");
+
+      console.log(
+        `Proof generation took ${
+          proofGenEndTime - proofGenStartTime
+        } milliseconds.`
+      );
+
       return proof;
     } catch (error) {
       console.error("Error during proof generation:", error.message);
